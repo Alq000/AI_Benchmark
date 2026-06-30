@@ -1,0 +1,5 @@
+{
+  "o4m": "openai/gpt-4o-mini",
+  "claude-3-5": "anthropic/claude-3.5-sonnet",
+  "llama3": "meta-llama/llama-3-70b-instruct"
+}
