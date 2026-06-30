@@ -5,7 +5,7 @@ ENV_SCHEMA = {
     "t": {"description": "Independent variable representing time.", "range": (0.0, 50.0)},
     "x": {"description": "Dependent state variable: displacement.", "range": (-10.0, 10.0)},
     "v": {"description": "Dependent state variable: velocity (dx/dt).", "range": (-20.0, 20.0)},
-    "m": {"description": "Mass of the oscillator.", "range": (0.5, 3.0)} # Changed from voltage_gain to m for your example
+    #"m": {"description": "Mass of the oscillator.", "range": (0.5, 3.0)}
 }
 
 # 2. THE TERM LIBRARY
@@ -17,7 +17,7 @@ TERM_LIBRARY = {
 }
 
 # The true value we want the agent to find for k_0 is 4.761
-TRUE_COEFFS = {"k_0": 4.761, "k_1": 0.123, "k_2": 0.282, "k_3": 0.006}
+TRUE_COEFFS = {"k_0": -4.761, "k_1": -0.123, "k_2": -0.282, "k_3": -0.006}
 
 # 3. THE DYNAMIC ENGINE
 def hidden_diffeq(t, y, *args, coeffs=TRUE_COEFFS):
