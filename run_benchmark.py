@@ -97,7 +97,7 @@ def call_openrouter_stream(messages, model, verbosity):
         print()
     return full_response
 
-def run_trial(trial_id, config, model_id, verbosity, plotting_mode, config_path, measurements_dir, noise_config):
+def run_trial(trial_id, config, model_id, verbosity, plotting_mode, config_path, measurements_dir, noise_config, dynamic_coeffs):
     system_prompt = prompts.get_system_prompt(config.ENV_SCHEMA)
     messages = [{"role": "system", "content": system_prompt}]
     
@@ -136,7 +136,8 @@ def run_trial(trial_id, config, model_id, verbosity, plotting_mode, config_path,
                 if k_pred is None:
                     raise ValueError("Could not find a term equivalent to 'x' in submission.")
                 
-                true_k0 = config.TRUE_COEFFS['k_0']
+                # Check against the dynamic coefficients assigned to this specific trial
+                true_k0 = dynamic_coeffs.get('k_0', config.TRUE_COEFFS.get('k_0'))
                 error = (k_pred - true_k0) / true_k0
                 
                 if verbosity >= 1:
@@ -177,18 +178,23 @@ def run_trial(trial_id, config, model_id, verbosity, plotting_mode, config_path,
                 num_trajectories = getattr(config, "NUM_TRAJECTORIES", 100)
                 
                 for traj_idx in range(num_trajectories):
-                    # Randomize Phase Space Initial Conditions
                     x_min, x_max = config.ENV_SCHEMA['x']['range']
                     v_min, v_max = config.ENV_SCHEMA['v']['range']
                     x0_true = np.random.uniform(x_min, x_max)
                     v0_true = np.random.uniform(v_min, v_max)
                     
-                    # Route through the config's input noise engine to catch actuator biases
-                    noisy_initial = config.apply_input_noise({"x": x0_true, "v": v0_true}, noise_config)
+                    # FIXED: Support both old 'apply_input_noise' and new 'apply_actuator_bias' names
+                    if hasattr(config, "apply_actuator_bias"):
+                        noisy_initial = config.apply_actuator_bias({"x": x0_true, "v": v0_true}, noise_config)
+                    else:
+                        noisy_initial = config.apply_input_noise({"x": x0_true, "v": v0_true}, noise_config)
+                        
                     x0_noisy = noisy_initial["x"]
                     v0_noisy = noisy_initial["v"] 
-                    # Simulate the full timeline efficiently
-                    sol = solve_ivp(config.hidden_diffeq, [t_start, max(t_end, 1e-5)], [x0_noisy, v0_noisy], t_eval=t_eval)
+                    
+                    # Wrap the diff eq to inject the specific dynamic parameters for this trial
+                    fun = lambda t, y: config.hidden_diffeq(t, y, coeffs=dynamic_coeffs)
+                    sol = solve_ivp(fun, [t_start, max(t_end, 1e-5)], [x0_noisy, v0_noisy], t_eval=t_eval)
                     
                     measurements = []
                     for i, t_val in enumerate(sol.t):
@@ -207,7 +213,6 @@ def run_trial(trial_id, config, model_id, verbosity, plotting_mode, config_path,
                         "measurements": measurements
                     })
                     
-                    # Optional Plotting for the first trajectory of the run
                     trigger_plot = (traj_idx == 0 and plotting_mode > 0)
                     if trigger_plot:
                         plot_filename = f"plot_turn_{turn}_run_{run_id}.png"
@@ -224,12 +229,10 @@ def run_trial(trial_id, config, model_id, verbosity, plotting_mode, config_path,
                         ]
                         subprocess.run(plot_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
-                # Write to isolation file
                 run_file = os.path.join(measurements_dir, f"run_{run_id}_experiment_data.json")
                 with open(run_file, "w") as f:
                     json.dump(current_run_data, f, indent=4)
                     
-                # Append to master history
                 master_file = os.path.join(measurements_dir, "all_compiled_experiments.json")
                 master_data = {}
                 if os.path.exists(master_file):
@@ -347,30 +350,40 @@ def main():
         "meas_lin_noise": args.meas_lin_noise if args.meas_lin_noise is not None else config.DEFAULT_NOISE_CONFIG["meas_lin_noise"]
     }
 
+    # =========================================================================
+    # INTERNAL CONTAINER EXECUTION (Runs within Docker)
+    # =========================================================================
     if args.internal_trial_id is not None:
         measurements_dir = os.path.join(args.internal_output_dir, "measurements")
         os.makedirs(measurements_dir, exist_ok=True)
         
+        # Pull dynamic true coefficients prepared by the host orchestrator
+        dynamic_coeffs = getattr(config, "TRUE_COEFFS", {}).copy()
+        coeffs_path = os.path.join(args.internal_output_dir, "true_coeffs.json")
+        if os.path.exists(coeffs_path):
+            with open(coeffs_path, "r") as f:
+                dynamic_coeffs = json.load(f)
+
         submission, error, chat_log = run_trial(
             args.internal_trial_id, config, args.model, args.verbosity, 
-            args.plotting, args.diff_eq_config, measurements_dir, noise_config
+            args.plotting, args.diff_eq_config, measurements_dir, noise_config, dynamic_coeffs
         )
         
         trial_data = {"trial_id": args.internal_trial_id, "status": "success" if submission else "failed", "chat_history": chat_log}
         with open(os.path.join(args.internal_output_dir, f"trial_{args.internal_trial_id}.json"), "w") as f:
             json.dump(trial_data, f, indent=4)
             
-        # Write true_k0 directly into summary payload so the script can access it 
-        true_k0 = config.TRUE_COEFFS.get('k_0') if hasattr(config, 'TRUE_COEFFS') else None
-        
         with open(os.path.join(args.internal_output_dir, "summary.json"), "w") as f:
             json.dump({
                 "submission": submission, 
                 "error": error,
-                "true_k0": true_k0
+                "true_k0": dynamic_coeffs.get('k_0')
             }, f, indent=4)
         sys.exit(0)
 
+    # =========================================================================
+    # HOST ORCHESTRATION ENGINE
+    # =========================================================================
     if args.model == "no_agent":
         model_id = "no_agent"
     else:
@@ -403,14 +416,25 @@ def main():
     all_submissions = []
     all_errors = []
 
+    # Prepare dynamic coefficients matrix for all runs
+    if hasattr(config, "generate_trial_coefficients"):
+        trial_parameter_sets = config.generate_trial_coefficients(args.num_trials)
+    else:
+        trial_parameter_sets = [getattr(config, "TRUE_COEFFS", {}) for _ in range(args.num_trials)]
+
     def launch_container_worker(trial_num):
         trial_folder = os.path.join(trials_dir, f"trial_{trial_num}")
         os.makedirs(os.path.join(trial_folder, "measurements"), exist_ok=True)
         
+        # Inject the unique ground-truth dict into the trial folder so the Docker container can read it
+        assigned_coeffs = trial_parameter_sets[trial_num - 1]
+        with open(os.path.join(trial_folder, "true_coeffs.json"), "w") as f:
+            json.dump(assigned_coeffs, f, indent=4)
+        
         if args.verbosity >= 1:
             with print_lock:
                 print(f"[Host Orchestrator] Spawning Docker Container for Trial {trial_num}...")
-
+        # Your original, intact Docker command structure
         docker_cmd = [
             "docker", "run", "--rm",
             "-e", f"OPENROUTER_API_KEY={OPENROUTER_API_KEY}",
@@ -476,16 +500,16 @@ def main():
         if os.path.exists(summary_path):
             with open(summary_path, "r") as f:
                 summary = json.load(f)
-            return trial_num, summary["submission"], summary["error"]
-        return trial_num, None, None
+            return trial_num, summary["submission"], summary["error"], assigned_coeffs
+        return trial_num, None, None, assigned_coeffs
 
     with ThreadPoolExecutor(max_workers=args.max_workers) as executor:
         future_to_container = {executor.submit(launch_container_worker, i + 1): i + 1 for i in range(args.num_trials)}
         for future in as_completed(future_to_container):
-            t_num, submission, error = future.result()
+            t_num, submission, error, assigned_coeffs = future.result()
             if submission is not None:
-                all_submissions.append({"trial": t_num, "submission": submission})
-                all_errors.append({"trial": t_num, "error": error})
+                all_submissions.append({"trial": t_num, "submission": submission, "true_coeffs": assigned_coeffs})
+                all_errors.append({"trial": t_num, "error": error, "true_coeffs": assigned_coeffs})
 
     all_submissions.sort(key=lambda x: x["trial"])
     all_errors.sort(key=lambda x: x["trial"])
@@ -499,7 +523,18 @@ def main():
     histogram_output_path = os.path.join(run_dir, "error_distribution_histogram.png")
     hist_cmd = [sys.executable, "plot_errors_histogram.py", "--errors_path", errors_log_path, "--config", args.diff_eq_config, "--output_path", histogram_output_path]
     subprocess.run(hist_cmd)
-    
+   
+    submissions_log_path = os.path.join(run_dir, "submissions_log.json")
+    accuracy_output_path = os.path.join(run_dir, "accuracy_band_plot.png")
+    accuracy_cmd = [
+        sys.executable, "plot_accuracy_band.py", 
+        "--submissions_path", submissions_log_path, 
+        "--config", args.diff_eq_config, 
+        "--output_path", accuracy_output_path
+    ]
+    print(f"Generating accuracy band plot...")
+    subprocess.run(accuracy_cmd)
+
     if args.verbosity >= 1:
         print(f"\n{'='*70}")
         print(f"[Benchmark Complete] Orchestration engine finished.")

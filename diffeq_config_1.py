@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.stats.qmc import LatinHypercube
 
 # 1. THE ENVIRONMENT SCHEMA
 ENV_SCHEMA = {
@@ -8,18 +9,46 @@ ENV_SCHEMA = {
 }
 
 # 2. EXPERIMENT SETTINGS
-NUM_TRAJECTORIES = 100  # Number of independent phase-space paths generated per experiment call
+NUM_TRAJECTORIES = 100  
 
 # 3. THE TERM LIBRARY
 TERM_LIBRARY = {
     "k_0": lambda **kwargs: kwargs.get('x'),
-    #"k_1": lambda **kwargs: kwargs.get('v'),
-    #"k_2": lambda **kwargs: kwargs.get('v') * abs(kwargs.get('v')),
+    "k_1": lambda **kwargs: kwargs.get('v'),
 }
 
-TRUE_COEFFS = {"k_0": -4.761, "k_1": 0}
+# --- SCALABLE COEFFICIENT PARAMETER SPACE ---
+# Easily add more parameters here to automatically scale LHS generation
+COEFF_RANGES = {
+    "k_0": (-10.0, -1.0),   # Linear displacement range
+    "k_1": (-5.0, 5.0),     # Velocity damping range
+}
 
-# 4. NOISE ENGINE CONFIGURATIONS (Defaults)
+# Fallback for old single-run compatibility
+TRUE_COEFFS = {"k_0": -4.761, "k_1": -1.234}
+
+def generate_trial_coefficients(num_trials, seed=42):
+    """
+    Generates a space-filling lattice of coefficients using Latin Hypercube Sampling
+    scaling automatically to any dimensions/parameters defined in COEFF_RANGES.
+    """
+    param_names = list(COEFF_RANGES.keys())
+    dimensions = len(param_names)
+    
+    sampler = LatinHypercube(d=dimensions, seed=seed)
+    samples = sampler.random(n=num_trials)
+    
+    trial_list = []
+    for i in range(num_trials):
+        trial_coeffs = {}
+        for d, name in enumerate(param_names):
+            low, high = COEFF_RANGES[name]
+            trial_coeffs[name] = float(low + samples[i, d] * (high - low))
+        trial_list.append(trial_coeffs)
+        
+    return trial_list
+
+# 4. NOISE ENGINE CONFIGURATIONS
 DEFAULT_NOISE_CONFIG = {
     "input_const_noise": 0.002,     
     "input_lin_noise": 0.001,       
@@ -27,31 +56,27 @@ DEFAULT_NOISE_CONFIG = {
     "meas_lin_noise": 0.005,        
 }
 
-# 5. SYSTEMATIC BIASES (Predictable physical instrument errors)
-# Defaults for a perfectly calibrated neutral machine: Offsets = 0.0, Scales = 1.0
+# 5. SYSTEMATIC BIASES
 SYSTEMATIC_BIAS = {
-    "measurement_x_offset": 0.05,  # e.g., +0.05 for a misaligned position sensor
-    "measurement_v_offset": 0.05,  # e.g., -0.02 for a misaligned velocity tracker
-    "actuator_scale_x": 1.0,      # e.g., 1.02 for a 2% physical overshoot on launch
-    "actuator_scale_v": 1.0       # e.g., 0.98 for a 2% undershoot on launch
+    "measurement_x_offset": 0.045,   
+    "measurement_v_offset": -0.022,  
+    "actuator_scale_x": 0.982,       
+    "actuator_scale_v": 1.015        
 }
 
-def add_noise_distribution(value, const_std, lin_std):
-    """Applies a realistic normal distribution combining constant floor & linear scaling error."""
-    std = const_std + (lin_std * abs(value))
-    if std <= 0:
-        return value
-    return float(np.random.normal(value, std))
+def add_noise_distribution(value, const_noise, lin_noise):
+    if isinstance(value, (list, np.ndarray)):
+        value = np.array(value)
+        sigma = const_noise + lin_noise * np.abs(value)
+        return value + np.random.normal(0, sigma, size=value.shape)
+    else:
+        sigma = const_noise + lin_noise * np.abs(value)
+        return value + np.random.normal(0, sigma)
 
-def apply_input_noise(pt, noise_override):
-    """Transforms input parameter targets with systematic actuator bias and noise."""
-    noisy_pt = pt.copy()
-    
-    # 1. Apply physical actuator scaling biases first
-    if 'x' in noisy_pt: noisy_pt['x'] *= SYSTEMATIC_BIAS["actuator_scale_x"]
-    if 'v' in noisy_pt: noisy_pt['v'] *= SYSTEMATIC_BIAS["actuator_scale_v"]
-    
-    # 2. Add statistical launch noise
+def apply_actuator_bias(requested_pt, noise_override):
+    noisy_pt = requested_pt.copy()
+    noisy_pt['x'] *= SYSTEMATIC_BIAS["actuator_scale_x"]
+    noisy_pt['v'] *= SYSTEMATIC_BIAS["actuator_scale_v"]
     for key in noisy_pt:
         noisy_pt[key] = add_noise_distribution(
             noisy_pt[key], 
@@ -61,32 +86,29 @@ def apply_input_noise(pt, noise_override):
     return noisy_pt
 
 def apply_measurement_noise(result, noise_override):
-    """Transforms precise solver outputs with systematic sensor drift and tracking noise."""
-    # 1. Apply physical systematic sensor offsets
     biased_x = result[0] + SYSTEMATIC_BIAS["measurement_x_offset"]
     biased_v = result[1] + SYSTEMATIC_BIAS["measurement_v_offset"]
-    
-    # 2. Add statistical measurement noise floor
     noisy_x = add_noise_distribution(biased_x, noise_override["meas_const_noise"], noise_override["meas_lin_noise"])
     noisy_v = add_noise_distribution(biased_v, noise_override["meas_const_noise"], noise_override["meas_lin_noise"])
     return [noisy_x, noisy_v]
 
 # 6. THE DYNAMIC ENGINE
-def hidden_diffeq(t, y, *args, coeffs=TRUE_COEFFS):
+def hidden_diffeq(t, y, *args, coeffs=None):
+    if coeffs is None:
+        coeffs = TRUE_COEFFS
+        
     x = y[0]
     v = y[1]
     
     extra_param_keys = [key for key in ENV_SCHEMA.keys() if key not in ['x', 'v', 't']]
-    
     context = {'t': t, 'x': x, 'v': v}
-    for key, val in zip(extra_param_keys, args):
-        context[key] = val
-
-    dxdt = v
-    dvdt = 0.0
-    
-    for key, coefficient in coeffs.items():
-        if key in TERM_LIBRARY:
-            dvdt += coefficient * TERM_LIBRARY[key](**context)
+    for i, key in enumerate(extra_param_keys):
+        if i < len(args):
+            context[key] = args[i]
             
-    return [dxdt, dvdt]
+    forcing = 0.0
+    for term_name, formula in TERM_LIBRARY.items():
+        if term_name in coeffs:
+            forcing += coeffs[term_name] * formula(**context)
+            
+    return [v, forcing]

@@ -1,1 +1,20 @@
+# Python environment and cache
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
 .env
+
+# Benchmark results and logs
+results/
+submissions_log.json
+errors_log.json
+
+# IDE/Editor settings
+.vscode/
+.idea/
+.DS_Store
+
+# Plot images
+*.png

@@ -123,7 +123,7 @@ def get_plot_bounds(errors, k_1, zoom_percentile):
     return min_val - pad, max_val + pad
 
 def main():
-    ZOOM_PERCENTILE = 80
+    ZOOM_PERCENTILE = 95
 
     parser = argparse.ArgumentParser(description="Generate Separated Agent and Blind SINDy Evaluation Output")
     parser.add_argument("--errors_path", type=str, required=True, help="Path to errors_log.json")
@@ -133,7 +133,7 @@ def main():
 
     config = load_config(args.config)
     true_k0 = config.TRUE_COEFFS.get('k_0', -4.761)
-    k_1 = abs(config.TRUE_COEFFS.get('k_1', -1.234))
+    k_1 = abs(config.TRUE_COEFFS.get('k_1', -1.234)) / true_k0
     real_equation = build_real_equation_string(config)
 
     agent_errors = []
