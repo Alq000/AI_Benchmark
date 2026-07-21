@@ -12,14 +12,21 @@ def load_config(config_path):
     spec.loader.exec_module(config)
     return config
 
-def build_real_equation_string(config):
+def build_real_equation_string(config, vary_params=False):
     terms = []
     # Map internal dictionary keys to their human-readable math equivalents
     var_map = {"k_0": "x", "k_1": "v", "k_2": "v|v|"}
-    for k, v in config.TRUE_COEFFS.items():
-        if v != 0:
-            var_name = var_map.get(k, k)
-            terms.append(f"{v}*{var_name}")
+    
+    keys_to_use = getattr(config, "COEFF_RANGES", config.TRUE_COEFFS).keys() if vary_params else config.TRUE_COEFFS.keys()
+    
+    for k in keys_to_use:
+        var_name = var_map.get(k, k)
+        if vary_params:
+            terms.append(f"{k}*{var_name}")
+        else:
+            v = config.TRUE_COEFFS.get(k, 0)
+            if v != 0:
+                terms.append(f"{v}*{var_name}")
     return "x_ddot = " + " + ".join(terms) if terms else "x_ddot = 0"
 
 def fit_sindy_coefficient(master_file_path, config):
@@ -129,12 +136,14 @@ def main():
     parser.add_argument("--errors_path", type=str, required=True, help="Path to errors_log.json")
     parser.add_argument("--config", type=str, required=True, help="Path to config file")
     parser.add_argument("--output_path", type=str, required=True, help="Base path for Agent plot image")
+    parser.add_argument("--vary_params", action="store_true", help="Adjust plots for varying parameters")
     args = parser.parse_args()
 
     config = load_config(args.config)
     true_k0 = config.TRUE_COEFFS.get('k_0', -4.761)
     k_1 = abs(config.TRUE_COEFFS.get('k_1', -1.234)) / true_k0
-    real_equation = build_real_equation_string(config)
+    real_equation = build_real_equation_string(config, args.vary_params)
+    k_1_val = k_1 if not args.vary_params else 0.0
 
     agent_errors = []
     if os.path.exists(args.errors_path):
@@ -153,9 +162,17 @@ def main():
             if os.path.exists(history_file):
                 k0_est, formula = fit_sindy_coefficient(history_file, config)
                 if k0_est is not None:
-                    sindy_errors.append(k0_est - true_k0)
+                    t_k0 = true_k0
+                    if args.vary_params:
+                        coeffs_path = os.path.join(trial_dir, "true_coeffs.json")
+                        if os.path.exists(coeffs_path):
+                            with open(coeffs_path, "r") as cf:
+                                dyn_coeffs = json.load(cf)
+                                t_k0 = dyn_coeffs.get("k_0", true_k0)
+                    
+                    sindy_errors.append(k0_est - t_k0)
                     with open(os.path.join(trial_dir, "sindy_report.json"), "w") as rf:
-                        json.dump({"estimated_k0": k0_est, "signed_error": k0_est - true_k0, "discovered_governing_formula": formula}, rf, indent=4)
+                        json.dump({"estimated_k0": k0_est, "signed_error": k0_est - t_k0, "discovered_governing_formula": formula}, rf, indent=4)
                         
     if not agent_errors: agent_errors = [0.0]
     if not sindy_errors: sindy_errors = [0.0]
@@ -168,7 +185,7 @@ def main():
     mean_agent, var_agent = np.mean(agent_errors), np.var(agent_errors)
     mean_sindy, var_sindy = np.mean(sindy_errors), np.var(sindy_errors)
 
-    min_agent, max_agent = get_plot_bounds(agent_errors, k_1, ZOOM_PERCENTILE)
+    min_agent, max_agent = get_plot_bounds(agent_errors, k_1_val, ZOOM_PERCENTILE)
     zoomed_agent_errors = agent_errors[(agent_errors >= min_agent) & (agent_errors <= max_agent)]
     x_span_agent = np.linspace(min_agent - abs(min_agent)*0.5, max_agent + abs(max_agent)*0.5, 1000)
 
@@ -186,11 +203,13 @@ def main():
     # NEW: Dedicated line for the Agent's Mean
     ax.axvline(x=mean_agent, color="#D97706", linestyle="-", linewidth=2.5, label=f"Agent Mean Error ({mean_agent:.4f})")
     
-    ax.axvline(x=k_1, color="purple", linestyle="-.", linewidth=1.5, label=f"+k_1 Threshold ({k_1:.3f})")
-    ax.axvline(x=-k_1, color="purple", linestyle="-.", linewidth=1.5, label=f"-k_1 Threshold (-{k_1:.3f})")
-    
-    # NEW: Add textual context box summarizing analytical ground truth
-    context_text = f"N = {n_agent} trials\nTrue Target k_0: {true_k0}\nReal Eq: {real_equation}"
+    if not args.vary_params:
+        ax.axvline(x=k_1, color="purple", linestyle="-.", linewidth=1.5, label=f"+k_1 Threshold ({k_1:.3f})")
+        ax.axvline(x=-k_1, color="purple", linestyle="-.", linewidth=1.5, label=f"-k_1 Threshold (-{k_1:.3f})")
+        context_text = f"N = {n_agent} trials\nTrue Target k_0: {true_k0}\nReal Eq: {real_equation}"
+    else:
+        context_text = f"N = {n_agent} trials\nReal Eq: {real_equation}"
+
     ax.text(0.02, 0.95, context_text, transform=ax.transAxes, fontsize=10,
             verticalalignment='top', bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.85, edgecolor='gray'))
 
@@ -210,7 +229,7 @@ def main():
     # Plot 2: SINDy Benchmark
     # ---------------------------------------------------------
     sindy_only_path = args.output_path.replace(".png", "_sindy_pure.png")
-    min_sindy, max_sindy = get_plot_bounds(sindy_errors, k_1, ZOOM_PERCENTILE)
+    min_sindy, max_sindy = get_plot_bounds(sindy_errors, k_1_val, ZOOM_PERCENTILE)
     zoomed_sindy_errors = sindy_errors[(sindy_errors >= min_sindy) & (sindy_errors <= max_sindy)]
     x_span_sindy = np.linspace(min_sindy - abs(min_sindy)*0.5, max_sindy + abs(max_sindy)*0.5, 1000)
 
@@ -226,10 +245,14 @@ def main():
             
     ax2.axvline(x=0, color="green", linestyle=":", linewidth=2, label="True Baseline Target")
     ax2.axvline(x=mean_sindy, color="#D97706", linestyle="-", linewidth=2.5, label=f"SINDy Mean Error ({mean_sindy:.4f})")
-    ax2.axvline(x=k_1, color="purple", linestyle="-.", linewidth=1.5, label=f"+k_1 Threshold ({k_1:.3f})")
-    ax2.axvline(x=-k_1, color="purple", linestyle="-.", linewidth=1.5, label=f"-k_1 Threshold (-{k_1:.3f})")
     
-    context_text_sindy = f"N = {n_sindy} trajectories parsed\nTrue Target k_0: {true_k0}\nReal Eq: {real_equation}"
+    if not args.vary_params:
+        ax2.axvline(x=k_1, color="purple", linestyle="-.", linewidth=1.5, label=f"+k_1 Threshold ({k_1:.3f})")
+        ax2.axvline(x=-k_1, color="purple", linestyle="-.", linewidth=1.5, label=f"-k_1 Threshold (-{k_1:.3f})")
+        context_text_sindy = f"N = {n_sindy} trajectories parsed\nTrue Target k_0: {true_k0}\nReal Eq: {real_equation}"
+    else:
+        context_text_sindy = f"N = {n_sindy} trajectories parsed\nReal Eq: {real_equation}"
+
     ax2.text(0.02, 0.95, context_text_sindy, transform=ax2.transAxes, fontsize=10,
             verticalalignment='top', bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.85, edgecolor='gray'))
 

@@ -5,11 +5,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 def extract_k0_prediction(submission_data):
-    """Safely extracts the k_0 ('x') coefficient, handling both strings and parsed lists."""
+    """Safely extracts the k_0 ('x') coefficient, handling both dicts, lists, and JSON strings."""
     if not submission_data:
         return None
         
-    # If it was saved as a raw string, parse it. If it's already a list/dict, use it directly.
+    # If it was saved as a raw string, parse it.
     if isinstance(submission_data, str):
         try:
             subs = json.loads(submission_data)
@@ -18,9 +18,13 @@ def extract_k0_prediction(submission_data):
     else:
         subs = submission_data
 
+    # Unwrap dictionary if top-level keys exist
+    if isinstance(subs, dict):
+        subs = subs.get("discovered_terms", [])
+
     try:
         for term_dict in subs:
-            if term_dict.get("term") == "x":
+            if isinstance(term_dict, dict) and term_dict.get("term") == "x":
                 return float(term_dict.get("coeff"))
     except Exception:
         pass

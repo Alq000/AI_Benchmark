@@ -4,29 +4,34 @@ import numpy as np
 from pathlib import Path
 
 def calculate_derivatives(t, v):
-    """Calculates numerical acceleration from velocity using central differences."""
-    a = np.zeros_like(v)
+    """Calculates numerical acceleration from velocity using central differences safely."""
+    a = np.zeros_like(v, dtype=float)
+    if len(t) < 3:
+        return a
+
     dt = np.diff(t)
     dv = np.diff(v)
-    
-    # Forward difference for the first point
-    a[0] = dv[0] / dt[0]
-    # Backward difference for the last point
-    a[-1] = dv[-1] / dt[-1]
-    # Central difference for the interior
-    a[1:-1] = (v[2:] - v[:-2]) / (t[2:] - t[:-2])
-    
+
+    # Avoid zero or micro-dt steps
+    dt_safe = np.where(np.abs(dt) < 1e-8, np.nan, dt)
+
+    a[0] = dv[0] / dt_safe[0] if not np.isnan(dt_safe[0]) else 0.0
+    a[-1] = dv[-1] / dt_safe[-1] if not np.isnan(dt_safe[-1]) else 0.0
+
+    dt_central = t[2:] - t[:-2]
+    dt_central_safe = np.where(np.abs(dt_central) < 1e-8, np.nan, dt_central)
+    a[1:-1] = (v[2:] - v[:-2]) / dt_central_safe
+
     return a
 
 def build_feature_library(x, v):
     """
     Builds the Theta matrix up to order 3.
-    Returns the matrix and the column index corresponding to the linear 'x' term (k_0).
+    Returns the matrix and column index corresponding to linear 'x' term (k_0).
     """
-    # Columns: [1, x, v, x^2, x*v, v^2, x^3, x^2*v, x*v^2, v^3]
     Theta = np.column_stack([
         np.ones_like(x),     # 0: Constant
-        x,                   # 1: Linear x (This is k_0)
+        x,                   # 1: Linear x (k_0)
         v,                   # 2: Linear v
         x**2,                # 3: x^2
         x * v,               # 4: xv
@@ -36,15 +41,10 @@ def build_feature_library(x, v):
         x * (v**2),          # 8: x v^2
         v**3                 # 9: v^3
     ])
-    
     k0_index = 1 
     return Theta, k0_index
 
 def calculate_best_error(trial_dir):
-    """
-    Reads the agent's sampled trajectories, computes the CRLB for k_0, 
-    and updates the summary.json file.
-    """
     trial_path = Path(trial_dir)
     measurements_file = trial_path / "measurements" / "all_compiled_experiments.json"
     summary_file = trial_path / "summary.json"
@@ -53,82 +53,80 @@ def calculate_best_error(trial_dir):
         print(f"Error: Missing required files in {trial_dir}")
         sys.exit(1)
 
-    # 1. Load the agent's experimental data
     with open(measurements_file, 'r') as f:
         data = json.load(f)
 
-    all_x = []
-    all_v = []
-    all_a = []
+    all_x, all_v, all_a = [], [], []
 
-    # Parse all nested trajectories to build a massive dataset
     for run_key, run_data in data.items():
         for trajectory in run_data.get("trajectories", []):
             measurements = trajectory.get("measurements", [])
-            
-            # Need at least 3 points to calculate central difference derivatives
             if len(measurements) < 3:
                 continue
-                
-            # Extract lists from the list of measurement dictionaries
-            t = np.array([m['t'] for m in measurements])
-            x = np.array([m['x_measured'] for m in measurements])
-            v = np.array([m['v_measured'] for m in measurements])
-            
+
+            t = np.array([m['t'] for m in measurements], dtype=float)
+            x = np.array([m['x_measured'] for m in measurements], dtype=float)
+            v = np.array([m['v_measured'] for m in measurements], dtype=float)
+
             a = calculate_derivatives(t, v)
-            
+
             all_x.extend(x)
             all_v.extend(v)
             all_a.extend(a)
 
-    all_x = np.array(all_x)
-    all_v = np.array(all_v)
-    all_a = np.array(all_a)
-    
-    # [Continue to Step 2. Build the Feature Library (Theta)...]
-    # 2. Build the Feature Library (Theta)
-    Theta, k0_index = build_feature_library(all_x, all_v)
-    
-    # 3. Calculate Information Matrix and Optimal Fit
-    # Using pseudoinverse (pinv) to handle poorly conditioned matrices 
-    # if the agent's sampling was physically highly restricted.
-    Theta_T_Theta = Theta.T @ Theta
-    Information_Matrix_Inv = np.linalg.pinv(Theta_T_Theta)
-    
-    c_optimal = Information_Matrix_Inv @ Theta.T @ all_a
+    all_x = np.array(all_x, dtype=float)
+    all_v = np.array(all_v, dtype=float)
+    all_a = np.array(all_a, dtype=float)
 
-    # 4. Residual Analysis (Noise Floor)
+    # Filter out invalid / numerical explosion values
+    valid_mask = np.isfinite(all_x) & np.isfinite(all_v) & np.isfinite(all_a)
+    all_x = all_x[valid_mask]
+    all_v = all_v[valid_mask]
+    all_a = all_a[valid_mask]
+
+    if len(all_a) < 10:
+        print(f"[Warning] Insufficient valid points ({len(all_a)}) in {trial_dir}")
+        return
+
+    Theta, k0_index = build_feature_library(all_x, all_v)
+
+    # Feature scaling for matrix stability
+    col_norms = np.linalg.norm(Theta, axis=0)
+    col_norms[col_norms == 0] = 1.0
+    Theta_scaled = Theta / col_norms
+
+    Theta_T_Theta_scaled = Theta_scaled.T @ Theta_scaled
+    Info_Matrix_Inv_scaled = np.linalg.pinv(Theta_T_Theta_scaled, rcond=1e-10)
+
+    c_optimal = (Info_Matrix_Inv_scaled @ (Theta_scaled.T @ all_a)) / col_norms
+
     a_predicted = Theta @ c_optimal
     residuals = all_a - a_predicted
-    
+
     N = len(all_a)
     p = Theta.shape[1]
-    
-    # Variance of the residuals (sigma^2)
-    sigma_epsilon_sq = np.sum(residuals**2) / (N - p)
-    sigma_epsilon = np.sqrt(sigma_epsilon_sq)
 
-    # 5. Calculate Best Reasonable Error (Standard Error of k_0)
-    variance_k0 = sigma_epsilon_sq * Information_Matrix_Inv[k0_index, k0_index]
-    
-    # Absolute baseline error
-    E_best_absolute = np.sqrt(max(variance_k0, 0)) 
+    sigma_epsilon_sq = np.sum(residuals**2) / max(N - p, 1)
+    sigma_epsilon = np.sqrt(max(sigma_epsilon_sq, 0))
 
-    # 6. Update the summary.json
+    # Scale variance weight back to original feature scale
+    fisher_weight_k0 = Info_Matrix_Inv_scaled[k0_index, k0_index] / (col_norms[k0_index]**2)
+    variance_k0 = sigma_epsilon_sq * fisher_weight_k0
+    E_best_absolute = np.sqrt(max(variance_k0, 0))
+
     with open(summary_file, 'r') as f:
         summary_data = json.load(f)
 
     summary_data['empirical_uncertainty'] = {
-        "best_case_k0_error_absolute": E_best_absolute,
-        "residual_noise_sigma": sigma_epsilon,
-        "fisher_information_k0_weight": Information_Matrix_Inv[k0_index, k0_index]
+        "best_case_k0_error_absolute": float(E_best_absolute),
+        "residual_noise_sigma": float(sigma_epsilon),
+        "fisher_information_k0_weight": float(fisher_weight_k0)
     }
 
-    # If the true k0 is in the summary, we can calculate the relative best error bound
     if 'true_k0' in summary_data and summary_data['true_k0'] != 0:
         true_k0 = summary_data['true_k0']
         E_best_relative = E_best_absolute / abs(true_k0)
-        summary_data['empirical_uncertainty']['best_case_k0_error_relative'] = E_best_relative
+        summary_data['empirical_uncertainty']['best_case_k0_error_relative'] = float(E_best_relative)
 
     with open(summary_file, 'w') as f:
         json.dump(summary_data, f, indent=4)
@@ -139,5 +137,5 @@ if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Usage: python calculate_empirical_error.py <path_to_trial_directory>")
         sys.exit(1)
-    
+
     calculate_best_error(sys.argv[1])

@@ -1,36 +1,41 @@
 import numpy as np
 from scipy.stats.qmc import LatinHypercube
 
-# 1. THE ENVIRONMENT SCHEMA
+# =========================================================================
+# 1. TOP-LEVEL CONFIGURATION FLAGS & TRAJECTORY SETTINGS
+# =========================================================================
+ALLOW_CUSTOM_INITIAL_CONDITIONS = False  # Toggle whether agent can specify x0, v0
+VARY_PARAMS = False                      # Default setting for varying trial coefficients
+NUM_TRAJECTORIES = 100                  # Number of trajectories sampled per experiment run
+MAX_TURNS = 40
+# =========================================================================
+# 2. ENVIRONMENT SCHEMA & PARAMETER SPACE
+# =========================================================================
 ENV_SCHEMA = {
     "t": {"description": "Independent variable representing time.", "range": (0.0, 50.0)},
     "x": {"description": "Dependent state variable: displacement.", "range": (-10.0, 10.0)},
     "v": {"description": "Dependent state variable: velocity (dx/dt).", "range": (-20.0, 20.0)},
 }
 
-# 2. EXPERIMENT SETTINGS
-NUM_TRAJECTORIES = 100  
+# Fallback for single-run evaluation
+TRUE_COEFFS = {"k_0": -4.761, "k_1": -1.234}
 
-# 3. THE TERM LIBRARY
-TERM_LIBRARY = {
-    "k_0": lambda **kwargs: kwargs.get('x'),
-    "k_1": lambda **kwargs: kwargs.get('v'),
-}
-
-# --- SCALABLE COEFFICIENT PARAMETER SPACE ---
-# Easily add more parameters here to automatically scale LHS generation
 COEFF_RANGES = {
     "k_0": (-10.0, -1.0),   # Linear displacement range
     "k_1": (-5.0, 5.0),     # Velocity damping range
 }
 
-# Fallback for old single-run compatibility
-TRUE_COEFFS = {"k_0": -4.761, "k_1": -1.234}
+# =========================================================================
+# 3. TERM LIBRARY
+# =========================================================================
+TERM_LIBRARY = {
+    "k_0": lambda **kwargs: kwargs.get('x'),
+    "k_1": lambda **kwargs: kwargs.get('v'),
+}
 
 def generate_trial_coefficients(num_trials, seed=42):
     """
-    Generates a space-filling lattice of coefficients using Latin Hypercube Sampling
-    scaling automatically to any dimensions/parameters defined in COEFF_RANGES.
+    Generates a space-filling lattice of coefficients using Latin Hypercube Sampling.
     """
     param_names = list(COEFF_RANGES.keys())
     dimensions = len(param_names)
@@ -48,7 +53,9 @@ def generate_trial_coefficients(num_trials, seed=42):
         
     return trial_list
 
+# =========================================================================
 # 4. NOISE ENGINE CONFIGURATIONS
+# =========================================================================
 DEFAULT_NOISE_CONFIG = {
     "input_const_noise": 0.002,     
     "input_lin_noise": 0.001,       
@@ -56,7 +63,9 @@ DEFAULT_NOISE_CONFIG = {
     "meas_lin_noise": 0.005,        
 }
 
-# 5. SYSTEMATIC BIASES
+# =========================================================================
+# 5. SYSTEMATIC BIASES & NOISE FUNCTIONS
+# =========================================================================
 SYSTEMATIC_BIAS = {
     "measurement_x_offset": 0.045,   
     "measurement_v_offset": -0.022,  
@@ -92,7 +101,9 @@ def apply_measurement_noise(result, noise_override):
     noisy_v = add_noise_distribution(biased_v, noise_override["meas_const_noise"], noise_override["meas_lin_noise"])
     return [noisy_x, noisy_v]
 
-# 6. THE DYNAMIC ENGINE
+# =========================================================================
+# 6. DYNAMIC ENGINE
+# =========================================================================
 def hidden_diffeq(t, y, *args, coeffs=None):
     if coeffs is None:
         coeffs = TRUE_COEFFS
