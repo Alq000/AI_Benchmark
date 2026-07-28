@@ -6,7 +6,7 @@ import re
 import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from benchmark_core.compile_benchmark_data import compile_data
+from test_core.compile_benchmark_data import compile_data
 
 print_lock = threading.Lock()
 
@@ -17,7 +17,8 @@ def run_orchestration(args, config, noise_config, openrouter_api_key):
         if not openrouter_api_key:
             print("Error: OPENROUTER_API_KEY environment variable is missing.")
             sys.exit(1)
-        with open("agents.json", "r") as f:
+        agents_path = os.path.abspath("core/configs/agents.json")
+        with open(agents_path, "r") as f:
             agents = json.load(f)
         model_id = agents.get(args.model, args.model)
     
@@ -66,11 +67,10 @@ def run_orchestration(args, config, noise_config, openrouter_api_key):
         docker_cmd = [
             "docker", "run", "--rm",
             "-e", f"OPENROUTER_API_KEY={openrouter_api_key}",
-            "-v", f"{os.path.abspath('prompts.py')}:/app/prompts.py:ro",
+            "-v", f"{os.path.abspath('core/configs/prompts.py')}:/app/core/configs/prompts.py:ro",
             "-v", f"{os.path.abspath('run_benchmark.py')}:/app/run_benchmark.py:ro",
-            "-v", f"{os.path.abspath('benchmark_core')}:/app/benchmark_core:ro",
-            "-v", f"{os.path.abspath('plot_core')}:/app/plot_core:ro",
-            "-v", f"{os.path.abspath('agents.json')}:/app/agents.json:ro",
+            "-v", f"{os.path.abspath('core')}:/app/core:ro",
+            "-v", f"{os.path.abspath('core/configs/agents.json')}:/app/core/configs/agents.json:ro",
             "-v", f"{os.path.abspath(args.diff_eq_config)}:/app/{args.diff_eq_config}:ro",
             "-v", f"{os.path.abspath(trial_folder)}:/app/results_output",
             "diffeq-benchmark",
@@ -112,7 +112,7 @@ def run_orchestration(args, config, noise_config, openrouter_api_key):
             if args.verbosity >= 1:
                 with print_lock:
                     print(f"[Host Orchestrator] Executing empirical error calculation for: {trial_folder}")
-            subprocess.run([sys.executable, "calculate_empirical_error.py", trial_folder], capture_output=True, text=True, check=True)
+            subprocess.run([sys.executable, os.path.join(os.path.dirname(__file__), "calculate_empirical_error.py"), trial_folder], capture_output=True, text=True, check=True)
         except Exception as e:
             with print_lock:
                 print(f"[Warning] Failed to launch empirical error script: {e}")
@@ -127,14 +127,14 @@ def run_orchestration(args, config, noise_config, openrouter_api_key):
             judge_docker_cmd = [
                 "docker", "run", "--rm",
                 "-e", f"OPENROUTER_API_KEY={openrouter_api_key}",
-                "-v", f"{os.path.abspath('prompts.py')}:/app/prompts.py:ro",
-                "-v", f"{os.path.abspath('agents.json')}:/app/agents.json:ro",
-                "-v", f"{os.path.abspath('rubric_config.py')}:/app/rubric_config.py:ro",
-                "-v", f"{os.path.abspath('judge_core')}:/app/judge_core:ro",
+                "-v", f"{os.path.abspath('core/configs/prompts.py')}:/app/core/configs/prompts.py:ro",
+                "-v", f"{os.path.abspath('core/configs/agents.json')}:/app/core/configs/agents.json:ro",
+                "-v", f"{os.path.abspath('core/configs/rubric_config.py')}:/app/core/configs/rubric_config.py:ro",
+                "-v", f"{os.path.abspath('core/judge_core')}:/app/core/judge_core:ro",
                 "-v", f"{os.path.abspath(args.diff_eq_config)}:/app/{args.diff_eq_config}:ro",
                 "-v", f"{os.path.abspath(trial_folder)}:/app/results_output:rw",
                 "diffeq-benchmark",
-                "python", "-m", "judge_core.judge_trial",
+                "python", "-m", "core.judge_core.judge_trial",
                 "--trial_dir", "/app/results_output",
                 "--diff_eq_config", args.diff_eq_config,
                 "--judge_model", judge_model_key
@@ -177,23 +177,23 @@ def run_orchestration(args, config, noise_config, openrouter_api_key):
 
     # Plots execution
     histogram_output_path = os.path.join(plots_dir, "error_distribution_histogram.png")
-    hist_cmd = [sys.executable, os.path.join("plot_core", "plot_errors_histogram.py"), "--errors_path", errors_log_path, "--config", args.diff_eq_config, "--output_path", histogram_output_path]
+    hist_cmd = [sys.executable, os.path.join("core", "plot_core", "plot_errors_histogram.py"), "--errors_path", errors_log_path, "--config", args.diff_eq_config, "--output_path", histogram_output_path]
     if getattr(args, "vary_params", False): hist_cmd.append("--vary_params")
     subprocess.run(hist_cmd)
    
     accuracy_output_path = os.path.join(plots_dir, "accuracy_band_plot.png")
     print(f"Generating accuracy band plot...")
-    subprocess.run([sys.executable, os.path.join("plot_core", "plot_accuracy_band.py"), "--submissions_path", submissions_log_path, "--config", args.diff_eq_config, "--output_path", accuracy_output_path])
+    subprocess.run([sys.executable, os.path.join("core", "plot_core", "plot_accuracy_band.py"), "--submissions_path", submissions_log_path, "--config", args.diff_eq_config, "--output_path", accuracy_output_path])
 
     sindy_diff_output_path = os.path.join(plots_dir, "sindy_agent_diff_plot.png")
     print(f"Generating SINDy vs Agent relative error difference plot...")
-    diff_cmd = [sys.executable, os.path.join("plot_core", "plot_sindy_agent_diff.py"), "--errors_path", errors_log_path, "--config", args.diff_eq_config, "--output_path", sindy_diff_output_path]
+    diff_cmd = [sys.executable, os.path.join("core", "plot_core", "plot_sindy_agent_diff.py"), "--errors_path", errors_log_path, "--config", args.diff_eq_config, "--output_path", sindy_diff_output_path]
     if getattr(args, "vary_params", False): diff_cmd.append("--vary_params")
     subprocess.run(diff_cmd)
 
     ratio_output_path = os.path.join(plots_dir, "agent_error_uncertainty_ratio_plot.png")
     print(f"Generating Agent error to empirical uncertainty ratio plot...")
-    ratio_cmd = [sys.executable, os.path.join("plot_core", "plot_agent_error_uncertainty_ratio.py"), "--errors_path", errors_log_path, "--config", args.diff_eq_config, "--output_path", ratio_output_path]
+    ratio_cmd = [sys.executable, os.path.join("core", "plot_core", "plot_agent_error_uncertainty_ratio.py"), "--errors_path", errors_log_path, "--config", args.diff_eq_config, "--output_path", ratio_output_path]
     if getattr(args, "vary_params", False): ratio_cmd.append("--vary_params")
     subprocess.run(ratio_cmd)
 

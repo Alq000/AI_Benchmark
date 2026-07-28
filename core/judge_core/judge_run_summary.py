@@ -4,8 +4,8 @@ import random
 import argparse
 import numpy as np
 
-import rubric_config
-from judge_core.judge_config import resolve_judge_model, call_judge_llm
+from core.configs import rubric_config
+from core.judge_core.judge_config import resolve_judge_model, call_judge_llm
 
 def summarize_run(run_dir, judge_model_key, api_key):
     trials_dir = os.path.join(run_dir, "trials")

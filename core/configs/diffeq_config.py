@@ -7,7 +7,7 @@ from scipy.stats.qmc import LatinHypercube
 ALLOW_CUSTOM_INITIAL_CONDITIONS = False  # Toggle whether agent can specify x0, v0
 VARY_PARAMS = False                      # Default setting for varying trial coefficients
 NUM_TRAJECTORIES = 100                  # Number of trajectories sampled per experiment run
-MAX_TURNS = 40
+MAX_TURNS = 5
 # =========================================================================
 # 2. ENVIRONMENT SCHEMA & PARAMETER SPACE
 # =========================================================================

@@ -5,11 +5,12 @@ import sys
 import sympy as sp
 from dotenv import load_dotenv
 
-from benchmark_core.agent_runner import run_trial
-from benchmark_core.config_loader import load_config
-from benchmark_core.orchestrator import run_orchestration
-from benchmark_core.statistical_validation import compute_ensemble_chi_squared
+sys.path.insert(0, os.path.abspath("core"))
 
+from test_core.config_loader import load_config
+from test_core.agent_runner import run_trial
+from test_core.orchestrator import run_orchestration
+from test_core.statistical_validation import compute_ensemble_chi_squared
 load_dotenv()
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
@@ -38,7 +39,7 @@ def main():
     )
     parser.add_argument("--model", type=str, required=True, help="Agent shorthand")
     parser.add_argument("--num_trials", type=int, default=1, help="Number of trials")
-    parser.add_argument("--diff_eq_config", type=str, required=True, help="Path to config file")
+    parser.add_argument("--diff_eq_config", type=str, default="core/configs/diffeq_config.py", help="Path to config file")
     parser.add_argument("--verbosity", type=int, choices=[0, 1, 2, 3, 4], default=4)
     parser.add_argument("--plotting", type=int, choices=[0, 1, 2], default=0)
     parser.add_argument("--max_workers", type=int, default=1)

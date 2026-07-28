@@ -8,7 +8,7 @@ import sympy as sp
 import numpy as np
 import subprocess
 from scipy.integrate import solve_ivp
-import prompts
+from configs import prompts
 
 def call_openrouter_stream(messages, model, verbosity, openrouter_api_key):
     if model == "no_agent":

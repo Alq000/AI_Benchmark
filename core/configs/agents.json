@@ -1,0 +1,10 @@
+{
+	"o4m": "openai/gpt-4o-mini",
+	"claude3.5": "anthropic/claude-3.5-sonnet",
+	"llama3": "meta-llama/llama-3-70b-instruct",
+  	"free_llama": "meta-llama/llama-3.3-70b-instruct:free",
+  	"free_flash": "deepseek/deepseek-v4-flash:free",
+	"free_auto": "openrouter/free",
+	"gpt5nano": "openai/gpt-5.4-nano",
+	"gpt_luna": "openai/gpt-5.6-luna"
+}

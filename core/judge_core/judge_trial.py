@@ -5,8 +5,8 @@ import argparse
 import importlib.util
 import sympy as sp
 
-import rubric_config
-from judge_core.judge_config import resolve_judge_model, call_judge_llm
+from core.configs import rubric_config
+from core.judge_core.judge_config import resolve_judge_model, call_judge_llm
 
 def check_equation_structure(agent_submission, diff_eq_config_path):
     """
