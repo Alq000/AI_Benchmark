@@ -22,7 +22,7 @@ TRUE_COEFFS = {"k_0": -4.761, "k_1": -1.234}
 
 COEFF_RANGES = {
     "k_0": (-10.0, -1.0),   # Linear displacement range
-    "k_1": (-5.0, 5.0),     # Velocity damping range
+    "k_1": (-10.0, -5.0),     # Velocity damping range
 }
 
 # =========================================================================
@@ -33,26 +33,54 @@ TERM_LIBRARY = {
     "k_1": lambda **kwargs: kwargs.get('v'),
 }
 
-def generate_trial_coefficients(num_trials, seed=42):
+def generate_trial_coefficients(num_trials, seed=42, grouping=None):
     """
-    Generates a space-filling lattice of coefficients using Latin Hypercube Sampling.
+    Generates coefficients. If grouping is > 0, distributes true_k0 evenly 
+    across discrete blocks, while randomly sampling k_1. Otherwise uses LHS.
     """
     param_names = list(COEFF_RANGES.keys())
-    dimensions = len(param_names)
     
-    sampler = LatinHypercube(d=dimensions, seed=seed)
-    samples = sampler.random(n=num_trials)
+    if grouping is None or grouping <= 0:
+        dimensions = len(param_names)
+        sampler = LatinHypercube(d=dimensions, seed=seed)
+        samples = sampler.random(n=num_trials)
+        trial_list = []
+        for i in range(num_trials):
+            trial_coeffs = {}
+            for d, name in enumerate(param_names):
+                low, high = COEFF_RANGES[name]
+                trial_coeffs[name] = float(low + samples[i, d] * (high - low))
+            trial_list.append(trial_coeffs)
+        return trial_list
+
+    # Grouping logic for k_0
+    num_groups = max(1, int(round(num_trials / grouping)))
+    low_k0, high_k0 = COEFF_RANGES["k_0"]
     
+    if num_groups == 1:
+        k0_values = np.array([(low_k0 + high_k0) / 2.0])
+    else:
+        k0_values = np.linspace(low_k0, high_k0, num_groups)
+
+    # Distribute the remainder across groups
+    base_pts = num_trials // num_groups
+    rem = num_trials % num_groups
+    group_counts = [base_pts + 1 if i < rem else base_pts for i in range(num_groups)]
+
+    k0_all = []
+    for k0_val, count in zip(k0_values, group_counts):
+        k0_all.extend([float(k0_val)] * count)
+
+    # Randomly sample k_1 
+    rng = np.random.default_rng(seed)
+    low_k1, high_k1 = COEFF_RANGES["k_1"]
+    k1_all = rng.uniform(low_k1, high_k1, size=num_trials)
+
     trial_list = []
     for i in range(num_trials):
-        trial_coeffs = {}
-        for d, name in enumerate(param_names):
-            low, high = COEFF_RANGES[name]
-            trial_coeffs[name] = float(low + samples[i, d] * (high - low))
-        trial_list.append(trial_coeffs)
+        trial_list.append({"k_0": float(k0_all[i]), "k_1": float(k1_all[i])})
         
     return trial_list
-
 # =========================================================================
 # 4. NOISE ENGINE CONFIGURATIONS
 # =========================================================================

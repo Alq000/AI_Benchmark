@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import sys
+import sympy as sp
 from dotenv import load_dotenv
 
 from benchmark_core.agent_runner import run_trial
@@ -43,32 +44,11 @@ def main():
     parser.add_argument("--max_workers", type=int, default=1)
 
     # CLI Flags allowing explicit boolean values (nargs="?" allows omitting the value to default to True)
-    parser.add_argument(
-        "--vary_params",
-        type=str2bool,
-        nargs="?",
-        const=True,
-        default=None,
-        metavar="True/False",
-        help="Vary coefficients using LHS across trials (e.g., --vary_params True/False)",
-    )
-    parser.add_argument(
-        "--custom_initial_conditions",
-        type=str2bool,
-        nargs="?",
-        const=True,
-        default=None,
-        metavar="True/False",
-        help="Allow agent to specify x0/v0 (e.g., --custom_initial_conditions True/False)",
-    )
+    parser.add_argument("--vary_params", type=str2bool, nargs="?", const=True, default=None, metavar="True/False", help="Vary coefficients using LHS across trials (e.g., --vary_params True/False)")
+    parser.add_argument("--custom_initial_conditions", type=str2bool, nargs="?", const=True, default=None, metavar="True/False", help="Allow agent to specify x0/v0 (e.g., --custom_initial_conditions True/False)")
+    parser.add_argument("--judge", nargs="?", const="gpt5nano", default=None, help="Enable LLM Judge evaluation.")
+    parser.add_argument("--grouping", type=int, default=0, help="Number of points per group for evenly spaced true parameters.")
 
-    parser.add_argument(
-        "--judge",
-        nargs="?",
-        const="gpt5nano",
-        default=None,
-        help="Enable LLM Judge evaluation.",
-    )
     parser.add_argument("--input_const_noise", type=float, default=None)
     parser.add_argument("--input_lin_noise", type=float, default=None)
     parser.add_argument("--meas_const_noise", type=float, default=None)
@@ -79,7 +59,7 @@ def main():
 
     args = parser.parse_args()
     config = load_config(args.diff_eq_config)
-
+    config.GROUPING = args.grouping
     # =========================================================================
     # RESOLUTION HIERARCHY: CLI > Config File > run_benchmark Default
     # =========================================================================
@@ -130,33 +110,17 @@ def main():
             args.custom_initial_conditions,
             max_turns=max_turns
         )
-        
-        # --- NEW: Inject Statistical Evaluation Here ---
-        if submission and "discovered_terms" in submission:
+       
+        # Read the ground-truth statistical validation written during sandbox execution
+        stat_val_path = os.path.join(args.internal_output_dir, "latest_stat_validation.json")
+        stat_val_data = {}
+        if os.path.exists(stat_val_path):
             try:
-                x_sym, v_sym = sp.symbols('x v')
-                accel_expr = 0
-                for entry in submission["discovered_terms"]:
-                    term_expr = sp.parse_expr(entry['term']).subs(sp.Symbol('x_dot'), v_sym) 
-                    accel_expr += float(entry['coeff']) * term_expr
-                
-                accel_func = sp.lambdify((x_sym, v_sym), accel_expr, modules='numpy')
-                
-                def discovered_ode(t, y):
-                    return [y[1], float(accel_func(y[0], y[1]))]
-                
-                master_file = os.path.join(measurements_dir, "all_compiled_experiments.json")
-                if os.path.exists(master_file):
-                    system_stats = compute_ensemble_chi_squared(
-                        master_file, discovered_ode, noise_config, len(submission["discovered_terms"])
-                    )
-                    submission["statistical_validation"] = system_stats
-                    
-                    if args.verbosity >= 1:
-                        print(f"\n[System] Independently computed statistical validation: {system_stats}")
+                with open(stat_val_path, "r") as sf:
+                    stat_val_data = json.load(sf)
             except Exception as e:
                 if args.verbosity >= 1:
-                    print(f"\n[System] Failed to compute internal stats: {e}")
+                    print(f"\n[System] Failed to read statistical validation log: {e}")
 
         trial_data = {"trial_id": args.internal_trial_id, "status": "success" if submission else "failed", "chat_history": chat_log}
         with open(os.path.join(args.internal_output_dir, f"trial_{args.internal_trial_id}.json"), "w") as f:
@@ -166,7 +130,8 @@ def main():
             json.dump({
                 "submission": submission, 
                 "error": error,
-                "true_k0": dynamic_coeffs.get('k_0')
+                "true_k0": dynamic_coeffs.get('k_0'),
+                "latest_statistical_validation": stat_val_data
             }, f, indent=4)
         sys.exit(0)
 

@@ -6,6 +6,7 @@ import re
 import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from benchmark_core.compile_benchmark_data import compile_data
 
 print_lock = threading.Lock()
 
@@ -46,7 +47,7 @@ def run_orchestration(args, config, noise_config, openrouter_api_key):
     all_errors = []
 
     if getattr(args, "vary_params", False) and hasattr(config, "generate_trial_coefficients"):
-        trial_parameter_sets = config.generate_trial_coefficients(args.num_trials)
+        trial_parameter_sets = config.generate_trial_coefficients(num_trials=args.num_trials, grouping=args.grouping)
     else:
         trial_parameter_sets = [getattr(config, "TRUE_COEFFS", {}) for _ in range(args.num_trials)]
 
@@ -201,6 +202,14 @@ def run_orchestration(args, config, noise_config, openrouter_api_key):
         if args.verbosity >= 1:
             print(f"\n[Host Orchestrator] Executing Run-Level Judge Summary & Sampling Analysis ({args.judge})...")
         summarize_run(run_dir, args.judge, openrouter_api_key) 
+
+    try:
+        if args.verbosity >= 1:
+            print(f"\n[Host Orchestrator] Auto-compiling benchmark data for run: {run_dir}...")
+        compile_data(base_dir=run_dir)
+    except Exception as e:
+        print(f"[Warning] Automatic data compilation failed: {e}")
+
     if args.verbosity >= 1:
         print(f"\n{'='*70}")
         print(f"[Benchmark Complete] Orchestration engine finished.")

@@ -25,9 +25,21 @@ def call_openrouter_stream(messages, model, verbosity, openrouter_api_key):
                 "Sandbox works. Executing experiment run.\n"
                 "<run_experiment>\n"
                 "{\n"
+                "  \"t_start\": 10.0,\n"
+                "  \"delta_t\": 0.05,\n"
+                "  \"steps\": 20\n"
+                "}\n"
+                "</run_experiment>"
+            )
+        elif assistant_turns == 2:
+            mock_output = (
+                "<run_experiment>\n"
+                "{\n"
                 "  \"t_start\": 0.0,\n"
                 "  \"delta_t\": 0.1,\n"
-                "  \"steps\": 50\n"
+                "  \"steps\": 20,\n"
+                "  \"x0\": 2.5,\n"
+                "  \"v0\": -1.0\n"
                 "}\n"
                 "</run_experiment>"
             )
@@ -35,13 +47,7 @@ def call_openrouter_stream(messages, model, verbosity, openrouter_api_key):
             mock_output = (
                 f"<submission>\n"
                 f"{{\n"
-                f"  \"discovered_terms\": [{{\"term\": \"x\", \"coeff\": -4.761}}],\n"
-                f"  \"statistical_validation\": {{\n"
-                f"    \"chi2_statistic\": 100.0,\n"
-                f"    \"degrees_of_freedom\": 100,\n"
-                f"    \"reduced_chi2\": 1.0,\n"
-                f"    \"p_value\": 0.5\n"
-                f"  }}\n"
+                f"  \"discovered_terms\": [{{\"term\": \"x\", \"coeff\": -4.761}}]\n"
                 f"}}\n"
                 f"</submission>"
             )
@@ -82,7 +88,7 @@ def call_openrouter_stream(messages, model, verbosity, openrouter_api_key):
     return full_response
 
 def run_trial(trial_id, config, model_id, verbosity, plotting_mode, config_path, measurements_dir, noise_config, dynamic_coeffs, openrouter_api_key, allow_custom_ic=False, max_turns=25):
-    system_prompt = prompts.get_system_prompt(config.ENV_SCHEMA, allow_custom_ic=allow_custom_ic)
+    system_prompt = prompts.get_system_prompt(config.ENV_SCHEMA, allow_custom_ic=allow_custom_ic, max_turns=max_turns)
     messages = [{"role": "system", "content": system_prompt}]
     
     if verbosity == 4:
@@ -106,18 +112,22 @@ def run_trial(trial_id, config, model_id, verbosity, plotting_mode, config_path,
         sub_match = re.search(r"<submission>(.*?)</submission>", response, re.DOTALL)
         if sub_match:
             try:
+                stat_file_path = os.path.join(os.path.dirname(measurements_dir), "latest_stat_validation.json")
+                if not os.path.exists(stat_file_path):
+                    raise ValueError(
+                        "You MUST run the ensemble Chi-Squared Goodness-of-Fit test using your Python sandbox "
+                        "and evaluate the results before submitting to determine if they are satisfactory. If "
+                        "they are not, you should conduct more experiments and data analysis."
+                    )
+
                 if verbosity >= 1:
                     print(f"\n[System] Parsing agent submission block...")
                 submission_data = json.loads(sub_match.group(1))
                 
-                if not isinstance(submission_data, dict) or "discovered_terms" not in submission_data or "statistical_validation" not in submission_data:
-                    raise ValueError("Submission must be a JSON object containing both 'discovered_terms' and 'statistical_validation' keys.")
+                if not isinstance(submission_data, dict) or "discovered_terms" not in submission_data:
+                    raise ValueError("Submission must be a JSON object containing the 'discovered_terms' key.")
                 
                 discovered_terms = submission_data["discovered_terms"]
-                stat_val = submission_data["statistical_validation"]
-                
-                if "reduced_chi2" not in stat_val:
-                    raise ValueError("The 'statistical_validation' block is missing required metrics like 'reduced_chi2'.")
 
                 k_pred = None
                 for entry in discovered_terms:
@@ -142,7 +152,7 @@ def run_trial(trial_id, config, model_id, verbosity, plotting_mode, config_path,
                     print(f"\n[System Error] {error_msg}")
                 messages.append({"role": "user", "content": error_msg})
                 continue
-
+       
         # 2. Check for Experiment
         exp_match = re.search(r"<run_experiment>(.*?)</run_experiment>", response, re.DOTALL)
         if exp_match:
