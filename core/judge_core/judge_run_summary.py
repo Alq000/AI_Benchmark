@@ -14,13 +14,13 @@ def summarize_run(run_dir, judge_model_key, api_key):
         return
 
     judge_files = []
-    for root, _, files in os.walk(trials_dir):
+    for root, _, files in os.walk(run_dir):
         for file in files:
             if file == "trial_judge.json":
                 judge_files.append(os.path.join(root, file))
 
     if not judge_files:
-        print("[Judge Summary Error] No trial_judge.json files found.")
+        print(f"[Judge Summary Error] No trial_judge.json files found in {run_dir}")
         return
 
     # 1. Exact Mathematical Aggregation across ALL Trials

@@ -1,0 +1,35 @@
+{
+  "num_divisions": 3,
+  "divisions": [
+    {
+      "division_id": 1,
+      "params": {
+        "input_const_noise": 0.0,
+        "input_lin_noise": 0.0,
+        "meas_const_noise": 0.0,
+        "meas_lin_noise": 0.0,
+        "max_turns": 10
+      }
+    },
+    {
+      "division_id": 2,
+      "params": {
+        "input_const_noise": 0.002,
+        "input_lin_noise": 0.001,
+        "meas_const_noise": 0.01,
+        "meas_lin_noise": 0.005,
+        "max_turns": 25
+      }
+    },
+    {
+      "division_id": 3,
+      "params": {
+        "input_const_noise": 0.5,
+        "input_lin_noise": 1.0,
+        "meas_const_noise": 1.0,
+        "meas_lin_noise": 0.8,
+        "max_turns": 50
+      }
+    }
+  ]
+}

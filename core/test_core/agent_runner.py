@@ -43,6 +43,29 @@ def call_openrouter_stream(messages, model, verbosity, openrouter_api_key):
                 "}\n"
                 "</run_experiment>"
             )
+
+        elif assistant_turns == 3:
+            mock_output = (
+                "Testing sandbox setup.\n"
+                "<run_python>\n"
+                "import os\n"
+                "import json\n"
+                "import numpy as np\n"
+                "import sys\n"
+                "if '/app' not in sys.path:\n"
+                "    sys.path.append('/app')\n"
+                "from core.test_core.statistical_validation import compute_ensemble_chi_squared\n"
+                "\n"
+                "def make_eq(b):\n"
+                "    def f(t, y):\n"
+                "        x, v = y\n"
+                "        return [v, -x - 5.0 * v + b]\n"
+                "    return f\n"
+                "\n"
+                "for b in (0.0, -0.067):\n"
+                "    compute_ensemble_chi_squared('./results_output/measurements/all_compiled_experiments.json', make_eq(b), 0.05, 0.1, 2)\n"
+                "</run_python>"
+            )
         else:
             mock_output = (
                 f"<submission>\n"

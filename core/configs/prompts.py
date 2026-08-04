@@ -89,9 +89,17 @@ ENVIRONMENT SCHEMA:
 9. **Measurement analysis:** Use Python to fit models, run SINDy, compute numerical derivatives, or perform OLS/ODR regressions.
 10. **Device limitations:** Account for sensor errors and noise floors.
 11. **Important Note:** Do not ask the user or system for help. Rely on yourself.
-12. **Instrumentation and Systematic Biases:** Zero out systematic biases and drifts using Python before regressing.
-13. **Mandatory Statistical Validation:** Before submitting, you MUST run an ensemble Chi-Squared Goodness-of-Fit test using `benchmark_core.statistical_validation.compute_ensemble_chi_squared` in your Python sandbox to verify your equation.
+12. **Instrumentation and Systematic Biases:** Systematic biases, uncertainties, noise and drifts exist like any real experimental apparatus.
+13. **Mandatory Statistical Validation:** Before submitting, you MUST run an ensemble Chi-Squared Goodness-of-Fit test using `core.test_core.statistical_validation.compute_ensemble_chi_squared` in your Python sandbox to verify your equation.
    
+   To import this in your script, include:
+   ```python
+   import sys
+   if "/app" not in sys.path:
+       sys.path.append("/app")
+   from core.test_core.statistical_validation import compute_ensemble_chi_squared
+
+
    The function signature is:
    `compute_ensemble_chi_squared(experiments_file_path, discovered_eq_func, calc_const_noise, calc_lin_noise, num_params_fitted)`
    

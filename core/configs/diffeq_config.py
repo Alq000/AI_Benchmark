@@ -7,7 +7,7 @@ from scipy.stats.qmc import LatinHypercube
 ALLOW_CUSTOM_INITIAL_CONDITIONS = False  # Toggle whether agent can specify x0, v0
 VARY_PARAMS = False                      # Default setting for varying trial coefficients
 NUM_TRAJECTORIES = 100                  # Number of trajectories sampled per experiment run
-MAX_TURNS = 5
+MAX_TURNS = 40
 # =========================================================================
 # 2. ENVIRONMENT SCHEMA & PARAMETER SPACE
 # =========================================================================
@@ -85,10 +85,10 @@ def generate_trial_coefficients(num_trials, seed=42, grouping=None):
 # 4. NOISE ENGINE CONFIGURATIONS
 # =========================================================================
 DEFAULT_NOISE_CONFIG = {
-    "input_const_noise": 0.002,     
-    "input_lin_noise": 0.001,       
-    "meas_const_noise": 0.01,       
-    "meas_lin_noise": 0.005,        
+    "input_const_noise": 0.4,     
+    "input_lin_noise": 0.2,       
+    "meas_const_noise": 0.2,       
+    "meas_lin_noise": 0.2,        
 }
 
 # =========================================================================
