@@ -53,6 +53,7 @@ def main():
     parser.add_argument("--verbosity", type=int, choices=[0, 1, 2, 3, 4], default=4)
     parser.add_argument("--plotting", type=int, choices=[0, 1, 2], default=0)
     parser.add_argument("--max_workers", type=int, default=1)
+    parser.add_argument("--plot_mmd_heatmap", type=str2bool, nargs="?", const=True, default=False, help="Generate MMD 2D heatmap video per trial")
 
     parser.add_argument("--vary_params", type=str2bool, nargs="?", const=True, default=None)
     parser.add_argument("--custom_initial_conditions", type=str2bool, nargs="?", const=True, default=None)
@@ -64,6 +65,11 @@ def main():
     parser.add_argument("--input_lin_noise", type=float, default=None)
     parser.add_argument("--meas_const_noise", type=float, default=None)
     parser.add_argument("--meas_lin_noise", type=float, default=None)
+
+    # Added arguments for 3x3 variance grid experiments
+    parser.add_argument("--use_alpha_beta_grid", "--use-alpha-beta-grid", type=str2bool, nargs="?", const=True, default=False, help="Toggle 3x3 alpha/beta variance grid behavior")
+    parser.add_argument("--alpha", type=float, default=None, help="Alpha parameter scaling baseline noise floor")
+    parser.add_argument("--beta", type=float, default=None, help="Beta parameter scaling state-dependent noise")
 
     parser.add_argument("--internal_trial_id", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--internal_output_dir", type=str, default=None, help=argparse.SUPPRESS)
@@ -90,11 +96,15 @@ def main():
     args.custom_initial_conditions = final_allow_custom_ic
     args.vary_params = final_vary_params
 
+    default_noise = getattr(config, "DEFAULT_NOISE_CONFIG", {})
     noise_config = {
-        "input_const_noise": args.input_const_noise if args.input_const_noise is not None else config.DEFAULT_NOISE_CONFIG["input_const_noise"],
-        "input_lin_noise": args.input_lin_noise if args.input_lin_noise is not None else config.DEFAULT_NOISE_CONFIG["input_lin_noise"],
-        "meas_const_noise": args.meas_const_noise if args.meas_const_noise is not None else config.DEFAULT_NOISE_CONFIG["meas_const_noise"],
-        "meas_lin_noise": args.meas_lin_noise if args.meas_lin_noise is not None else config.DEFAULT_NOISE_CONFIG["meas_lin_noise"]
+        "input_const_noise": args.input_const_noise if args.input_const_noise is not None else default_noise.get("input_const_noise", 0.0),
+        "input_lin_noise": args.input_lin_noise if args.input_lin_noise is not None else default_noise.get("input_lin_noise", 0.0),
+        "meas_const_noise": args.meas_const_noise if args.meas_const_noise is not None else default_noise.get("meas_const_noise", 0.1),
+        "meas_lin_noise": args.meas_lin_noise if args.meas_lin_noise is not None else default_noise.get("meas_lin_noise", 0.1),
+        "use_alpha_beta_grid": args.use_alpha_beta_grid,
+        "alpha": args.alpha if args.alpha is not None else default_noise.get("alpha", 1.0),
+        "beta": args.beta if args.beta is not None else default_noise.get("beta", 1.0)
     }
 
     # =========================================================================
@@ -145,11 +155,16 @@ def main():
         with open(os.path.join(target_dir, f"trial_{args.internal_trial_id}.json"), "w") as f:
             json.dump(trial_data, f, indent=4)
 
+        # In run_benchmark.py (Inside internal container execution block)
 
-        # Write merged summary.json
         summary_payload = {
             "submission": submission,
-            "error": error,
+            "mse": error,
+            "mse_details": {
+                "mse_x": submission.get("mse_x") if isinstance(submission, dict) else None,
+                "mse_v": submission.get("mse_v") if isinstance(submission, dict) else None,
+                "mse_total": submission.get("mse_total") if isinstance(submission, dict) else None
+            },
             "true_coeffs": true_coeffs_data,
             "override_params": override_params_data,
             "latest_statistical_validation": stat_val_data

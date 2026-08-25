@@ -6,5 +6,8 @@
   	"free_flash": "deepseek/deepseek-v4-flash:free",
 	"free_auto": "openrouter/free",
 	"gpt5nano": "openai/gpt-5.4-nano",
-	"gpt_luna": "openai/gpt-5.6-luna"
+	"gpt_luna": "openai/gpt-5.6-luna",
+	"gpt_luna_pro": "openai/gpt-5.6-luna-pro"
+
+
 }

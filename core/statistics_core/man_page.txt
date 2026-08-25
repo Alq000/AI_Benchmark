@@ -1,0 +1,130 @@
+STATISTICAL TOOLS HELP MAN PAGE
+
+* Trajectory Evaluator (`core.statistics_core.utils.evaluate_trajectories`)
+  Inputs:
+    - experiments_file_path (str): Path to the compiled experiments JSON data file.
+    - script_or_func (str or callable): Either a path string to your Python script file or a direct function reference (`predict_trajectory`).
+    - sigma_x_func (callable): Your sigma_x(x, v, t) function — the same one from your submission. Called as sigma_x_func(x_obs, v_obs, t) per trajectory and must return a float or 1-D ndarray of the same length as x_obs.
+    - bias_x_func (callable, optional): Your bias_x(x, v, t) function. Called as bias_x_func(x_exp, v_exp, t) per trajectory to remove systematic offset prior to residual analysis.  # ← CHANGED: Documented bias_x_func
+* Chi-Squared Goodness-of-Fit Test (`core.statistics_core.chi_squared.run_chi_squared` / `compute_chi_squared`)
+  Inputs (run_chi_squared):
+    - experiments_file_path (str): Path to the compiled experiments JSON data file.
+    - script_or_func (str or callable): Path string to your Python script or a direct function reference.
+    - sigma_x_func (callable): Your sigma_x(x, v, t) function returning measurement uncertainty.
+    - num_params_fitted (int): Number of free parameters fit in your proposed model.
+    - eval_data (dict, optional): Pre-computed result dictionary from evaluate_trajectories.
+    - bias_x_func (callable, optional): Your bias_x(x, v, t) function to subtract systematic bias.
+* F-Test Model Comparison (`core.statistics_core.f_test.run_f_test` / `compute_f_test`)
+  Inputs (run_f_test):
+    - experiments_file_path (str): Path to the compiled experiments JSON data file.
+    - script_or_func (str or callable): Path string to your Python script or a direct function reference.
+    - sigma_x_func (callable): Your sigma_x(x, v, t) function returning measurement uncertainty.
+    - num_params_fitted (int): Number of parameters in full model.
+    - num_params_reduced (int, default=1): Number of parameters in reduced baseline model.
+    - rss_reduced (float, optional): Custom RSS for reduced model (defaults to mean baseline RSS).
+    - eval_data (dict, optional): Pre-computed result dictionary from evaluate_trajectories.
+
+* Kolmogorov-Smirnov Test (`core.statistics_core.ks_test.run_ks_test` / `compute_ks_test`)
+  Inputs (run_ks_test):
+    - experiments_file_path (str): Path to the compiled experiments JSON data file.
+    - script_or_func (str or callable): Path string to your Python script or callable function.
+    - sigma_x_func (callable): Your sigma_x(x, v, t) function returning measurement uncertainty.
+    - cdf (str, default='norm'): Reference CDF distribution name for scipy.stats.kstest.
+    - eval_data (dict, optional): Pre-computed result dictionary from evaluate_trajectories.
+
+* Likelihood Ratio Test (`core.statistics_core.likelihood_ratio_test.run_likelihood_ratio_test` / `compute_likelihood_ratio_test`)
+  Inputs (run_likelihood_ratio_test):
+    - experiments_file_path (str): Path to JSON data file.
+    - script_or_func (str or callable): Python script path or function.
+    - sigma_x_func (callable): Your sigma_x(x, v, t) function returning measurement uncertainty.
+    - num_params_fitted (int): Parameters in full model.
+    - num_params_reduced (int, default=1): Parameters in reduced baseline model.
+    - log_likelihood_reduced (float, optional): Custom log-likelihood of reduced model.
+    - eval_data (dict, optional): Pre-computed result dictionary.
+
+* Chow Test (`core.statistics_core.chow_test.run_chow_test` / `compute_chow_test`)
+  Inputs (run_chow_test):
+    - experiments_file_path (str): Path to JSON data file.
+    - script_or_func (str or callable): Python script path or function.
+    - sigma_x_func (callable): Your sigma_x(x, v, t) function returning measurement uncertainty.
+    - num_params_fitted (int): Parameters in full model.
+    - split_ratio (float, default=0.5): Data split fraction for structural consistency check.
+    - eval_data (dict, optional): Pre-computed result dictionary.
+
+* Full Ensemble Validation (`core.statistics_core.statistical_validation.compute_ensemble_chi_squared`)
+  Inputs:
+    - experiments_file_path (str): Path to the compiled experiments JSON data file.
+    - script_or_func (str or callable): Path string to your Python script or a direct function reference.
+    - sigma_x_func (callable): Your sigma_x(x, v, t) function — the same one from your submission.
+    - num_params_fitted (int): Parameters in proposed model.
+    - num_params_reduced (int, default=1): Parameters in reduced baseline model.
+    - rss_reduced (float, optional): Custom RSS for reduced model.
+    - log_likelihood_reduced (float, optional): Custom log-likelihood for reduced model.
+    - split_ratio (float, default=0.5): Dataset partition split ratio for Chow test.
+
+* Automated Trajectory Loader (`core.statistics_core.trajectory_loader.load_trajectories`)
+  Description:
+    Standardized utility that parses history JSON files directly into structured lists of dictionaries containing clean NumPy arrays (`t`, `x`, `v`, `x0`, `v0`, `trajectory_id`).
+  Inputs:
+    - experiments_file_path (str): Path to the compiled experiments JSON data file.
+  Outputs:
+    - list: Collection of trajectory dictionaries preventing routine parsing boilerplate.
+
+* Splines & Smoothing Differentiation (`core.statistics_core.splines_differentiation.compute_spline_derivatives`)
+  Description:
+    Fits a continuous UnivariateSpline to state data $x(t)$ to generate continuous closed-form analytical derivatives deterministically. Includes optional matplotlib graphing.
+  Inputs:
+    - t (array-like): Time array.
+    - x (array-like): Position array.
+    - smoothing_factor (float, optional): Penalty parameter for smoothing.
+    - save_dir (str, optional): Directory path to save output visualization.
+    - plot_title (str, optional): Title for the generated plot.
+  Outputs:
+    - dict: Contains discrete arrays ('x_smooth', 'v_smooth', 'a_smooth'), high-resolution dense location arrays for custom plotting ('t_dense', 'x_dense', 'v_dense', 'a_dense'), the callable 'spline_obj' for continuous evaluation, and 'image_path'.
+* Non-Parametric Noise Sampler (`core.statistics_core.noise_sampler.run_conditional_noise_estimation`)
+  Description:
+    Constructs a stochastic Gaussian KDE based on empirical calibration residuals ($\Delta x$) allowing direct noise sampling without inventing parameters.
+  Inputs:
+    - x_obs (array-like): Observed state measurements.
+    - x_exp (array-like): Expected/predicted state measurements.
+  Outputs:
+    - dict: Contains 'residuals_mean', 'residuals_std', and 'sampler_func' (a callable function taking `n_samples` as input).
+
+* Information Criteria Evaluator (`core.statistics_core.information_criteria.run_ic_evaluation`)
+  Description:
+    Calculates Akaike Information Criterion (AIC) and Bayesian Information Criterion (BIC) to objectively penalize additional fitted parameters.
+  Inputs:
+    - eval_data (dict): Dictionary produced by evaluate_trajectories.
+    - num_params_fitted (int): Number of parameters in proposed model.
+  Outputs:
+    - dict: Contains 'aic' (float), 'bic' (float), 'rss' (float), 'n_samples' (int), and 'num_params' (int).
+
+* Kinematic RTS Smoother (`core.statistics_core.kalman_smoother.run_kinematic_rts_smoother`)
+  Description:
+    Rauch-Tung-Striebel (RTS) Kalman smoother leveraging the exact $\dot{x} = v$ relationship to cleanly filter noise across both signals simultaneously.
+  Inputs:
+    - t (array-like): Time steps.
+    - x_obs (array-like): Observed positions.
+    - v_obs (array-like): Observed velocities.
+    - sigma_x (float): Measurement noise std for position.
+    - sigma_v (float): Measurement noise std for velocity.
+  Outputs:
+    - dict: Contains 'x_smooth' and 'v_smooth' denoised arrays.
+
+* Confidence Intervals & Significance Bands (`core.statistics_core.confidence_intervals.compute_confidence_intervals`)
+  Description:
+    Calculates parameter standard errors, 1-sigma (68.3%) and 2-sigma (95.4%) parameter bounds via the asymptotic covariance matrix, residual z-score significance distributions, and optional continuous trajectory error propagation bands.
+  Inputs:
+    - params (array-like): Fitted model parameters array.
+    - jacobian (array-like): N x P Jacobian matrix of partial derivatives d(y_i)/d(theta_j).
+    - residuals (array-like): N-element residual vector (y_obs - y_pred).
+    - noise_std (float or array-like, optional): Known measurement uncertainty sigma.
+    - jacobian_pred (array-like, optional): M x P evaluation Jacobian across a dense time grid for continuous trajectory bands.
+  Outputs:
+    - dict: Contains 'covariance_matrix', 'param_se', 'param_bounds_1sigma', 'param_bounds_2sigma', 'residual_z_scores', 'within_1sigma_ratio', 'within_2sigma_ratio', 'pred_band_1sigma', and 'pred_band_2sigma'.
+  Usage Example:
+    ```python
+    res = compute_confidence_intervals(params, jac, residuals, noise_std=sigma_x)
+    print("1-Sigma Bounds:", res["param_bounds_1sigma"])
+    print("Residuals within 2-Sigma:", res["within_2sigma_ratio"])
+    ```

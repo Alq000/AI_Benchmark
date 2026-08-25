@@ -12,21 +12,53 @@ def load_config(config_path):
     spec.loader.exec_module(config)
     return config
 
+def extract_trial_coeffs(trial_dir=None, log_entry=None):
+    """Extracts k_0 and k_1 directly from trial artifacts or log entries without relying on TRUE_COEFFS."""
+    coeffs = {}
+    if log_entry and isinstance(log_entry, dict):
+        if "true_coeffs" in log_entry and isinstance(log_entry["true_coeffs"], dict):
+            coeffs.update(log_entry["true_coeffs"])
+        if "true_k0" in log_entry:
+            coeffs["k_0"] = log_entry["true_k0"]
+        if "true_k1" in log_entry:
+            coeffs["k_1"] = log_entry["true_k1"]
+
+    if trial_dir and os.path.exists(trial_dir):
+        for fname in ["true_coeffs.json", "summary.json"]:
+            fpath = os.path.join(trial_dir, fname)
+            if os.path.exists(fpath):
+                try:
+                    with open(fpath, "r") as f:
+                        data = json.load(f)
+                        if isinstance(data, dict):
+                            tc = data if fname == "true_coeffs.json" else (data.get("true_coeffs") or data.get("assigned_coeffs"))
+                            if isinstance(tc, dict):
+                                for k, v in tc.items():
+                                    if k not in coeffs:
+                                        coeffs[k] = v
+                except Exception:
+                    pass
+    return coeffs
+
 def build_real_equation_string(config, vary_params=False):
     terms = []
-    # Map internal dictionary keys to their human-readable math equivalents
-    var_map = {"k_0": "x", "k_1": "v", "k_2": "v|v|"}
+    term_lib = getattr(config, "TERM_LIBRARY", {})
+    coeff_ranges = getattr(config, "COEFF_RANGES", {})
     
-    keys_to_use = getattr(config, "COEFF_RANGES", config.TRUE_COEFFS).keys() if vary_params else config.TRUE_COEFFS.keys()
+    keys_to_use = list(term_lib.keys()) if term_lib else list(coeff_ranges.keys())
     
     for k in keys_to_use:
-        var_name = var_map.get(k, k)
-        if vary_params:
-            terms.append(f"{k}*{var_name}")
-        else:
-            v = config.TRUE_COEFFS.get(k, 0)
-            if v != 0:
-                terms.append(f"{v}*{var_name}")
+        var_symbol = k
+        if k in term_lib:
+            try:
+                # Dynamically extract variable name by executing term lambda against variable symbols
+                res = term_lib[k](x="x", v="v", t="t")
+                if isinstance(res, str) and res:
+                    var_symbol = res
+            except Exception:
+                pass
+        terms.append(f"{k}*{var_symbol}")
+            
     return "x_ddot = " + " + ".join(terms) if terms else "x_ddot = 0"
 
 def fit_sindy_coefficient(master_file_path, config):
@@ -138,42 +170,81 @@ def main():
     parser.add_argument("--output_path", type=str, required=True, help="Base path for Agent plot image")
     parser.add_argument("--vary_params", action="store_true", help="Adjust plots for varying parameters")
     args = parser.parse_args()
-
+    
     config = load_config(args.config)
-    true_k0 = config.TRUE_COEFFS.get('k_0', -4.761)
-    k_1 = abs(config.TRUE_COEFFS.get('k_1', -1.234)) / true_k0
     real_equation = build_real_equation_string(config, args.vary_params)
-    k_1_val = k_1 if not args.vary_params else 0.0
 
+    base_dir = os.path.dirname(args.errors_path)
+    log_data = []
     agent_errors = []
+    agent_k1_ratios = []
+
     if os.path.exists(args.errors_path):
         with open(args.errors_path, "r") as f:
             log_data = json.load(f)
-        agent_errors = [entry["error"] for entry in log_data if "error" in entry and entry["error"] is not None]
+            
+        for entry in log_data:
+            trial_id = entry.get("trial") or entry.get("trial_id") or entry.get("internal_trial_id")
+            trial_dir = None
+            if trial_id is not None:
+                folder_str = f"trial_{trial_id:03d}" if isinstance(trial_id, int) else (f"trial_{trial_id}" if not str(trial_id).startswith("trial_") else str(trial_id))
+                candidate_dir = os.path.join(base_dir, "trials", folder_str)
+                if os.path.exists(candidate_dir):
+                    trial_dir = candidate_dir
+                else:
+                    candidate_dir2 = os.path.join(base_dir, folder_str)
+                    if os.path.exists(candidate_dir2):
+                        trial_dir = candidate_dir2
 
-    base_dir = os.path.dirname(args.errors_path)
+            coeffs = extract_trial_coeffs(trial_dir, entry)
+            t_k0 = coeffs.get("k_0")
+            t_k1 = coeffs.get("k_1")
+
+            if t_k0 is not None and t_k1 is not None and t_k0 != 0:
+                agent_k1_ratios.append(abs(t_k1 / t_k0))
+
+            if "submitted_k0" in entry and t_k0 is not None:
+                agent_errors.append(entry["submitted_k0"] - t_k0)
+            elif "error" in entry and entry["error"] is not None:
+                agent_errors.append(entry["error"])
+
     sindy_errors = []
-    trials_path = os.path.join(base_dir, "trials")
+    trials_path = os.path.join(base_dir, "trials") if os.path.exists(os.path.join(base_dir, "trials")) else base_dir
     
     if os.path.exists(trials_path):
         for t_folder in sorted(os.listdir(trials_path)):
             trial_dir = os.path.join(trials_path, t_folder)
+            if not os.path.isdir(trial_dir):
+                continue
             history_file = os.path.join(trial_dir, "measurements", "all_compiled_experiments.json")
             if os.path.exists(history_file):
                 k0_est, formula = fit_sindy_coefficient(history_file, config)
                 if k0_est is not None:
-                    t_k0 = true_k0
-                    if args.vary_params:
-                        coeffs_path = os.path.join(trial_dir, "true_coeffs.json")
-                        if os.path.exists(coeffs_path):
-                            with open(coeffs_path, "r") as cf:
-                                dyn_coeffs = json.load(cf)
-                                t_k0 = dyn_coeffs.get("k_0", true_k0)
-                    
-                    sindy_errors.append(k0_est - t_k0)
-                    with open(os.path.join(trial_dir, "sindy_report.json"), "w") as rf:
-                        json.dump({"estimated_k0": k0_est, "signed_error": k0_est - t_k0, "discovered_governing_formula": formula}, rf, indent=4)
+                    matched_entry = None
+                    if isinstance(log_data, list):
+                        for entry in log_data:
+                            t_id = entry.get("trial") or entry.get("trial_id")
+                            if t_id and (str(t_id) in t_folder or f"trial_{t_id:03d}" == t_folder):
+                                matched_entry = entry
+                                break
+
+                    coeffs = extract_trial_coeffs(trial_dir, matched_entry)
+                    t_k0 = coeffs.get("k_0")
+
+                    if t_k0 is not None:
+                        signed_err = k0_est - t_k0
+                        sindy_errors.append(signed_err)
                         
+                        with open(os.path.join(trial_dir, "sindy_report.json"), "w") as rf:
+                            json.dump({
+                                "estimated_k0": k0_est,
+                                "true_k0": t_k0,
+                                "signed_error": signed_err,
+                                "discovered_governing_formula": formula
+                            }, rf, indent=4)
+
+    k_1_val = float(np.mean(agent_k1_ratios)) if (not args.vary_params and agent_k1_ratios) else 0.0
+
     if not agent_errors: agent_errors = [0.0]
     if not sindy_errors: sindy_errors = [0.0]
 
